@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+
+# Environments
+.env
+.venv
+
+# MacOS
+.DS_Store
+
+# cache
+data/*.json
