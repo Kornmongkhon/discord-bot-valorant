@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
 import traceback
@@ -91,8 +92,13 @@ class ValorantBot(commands.Bot):
             get_cache()
 
     async def close(self) -> None:
-        if self.session:
+        for extension in tuple(self.extensions):
+            with contextlib.suppress(Exception):
+                await self.unload_extension(extension)
+
+        if self.session and not self.session.closed:
             await self.session.close()
+            self.session = None
         await super().close()
 
     async def start(self, debug: bool = False) -> None:  # type: ignore[override]
@@ -100,9 +106,22 @@ class ValorantBot(commands.Bot):
         return await super().start(os.getenv('DISCORD_TOKEN'), reconnect=True)  # type: ignore
 
 
-def run_bot() -> None:
+async def run_bot_async() -> None:
     bot = ValorantBot()
-    asyncio.run(bot.start())
+    try:
+        await bot.start()
+    finally:
+        if not bot.is_closed():
+            print('\nShutting down bot...')
+            await bot.close()
+            print('Bot stopped.')
+
+
+def run_bot() -> None:
+    try:
+        asyncio.run(run_bot_async())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == '__main__':

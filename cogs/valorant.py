@@ -19,6 +19,15 @@ from utils.valorant.resources import setup_emoji
 
 VLR_locale = ValorantTranslator()
 
+RIOT_BROWSER_LOGIN_URL = (
+    'https://auth.riotgames.com/authorize'
+    '?redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in'
+    '&client_id=play-valorant-web-prod'
+    '&response_type=token%20id_token'
+    '&scope=account%20openid'
+    '&nonce=1'
+)
+
 if TYPE_CHECKING:
     from bot import ValorantBot
 
@@ -146,10 +155,6 @@ class ValorantCog(commands.Cog, name='Valorant'):
         # get endpoint
         endpoint = await self.get_endpoint(interaction.user.id, interaction.locale)  # type: ignore
 
-        # fetch skin price
-        skin_price = endpoint.store_fetch_offers()
-        self.db.insert_skin_price(skin_price)
-
         # data
         data = endpoint.store_fetch_storefront()
         embeds = GetEmbed.store(endpoint.player, data, response, self.bot)
@@ -217,10 +222,6 @@ class ValorantCog(commands.Cog, name='Valorant'):
 
         # endpoint
         endpoint = await self.get_endpoint(interaction.user.id, interaction.locale)  # type: ignore
-
-        # fetch skin price
-        skin_price = endpoint.store_fetch_offers()
-        self.db.insert_skin_price(skin_price)
 
         # data
         data = endpoint.store_fetch_storefront()
@@ -335,6 +336,31 @@ class ValorantCog(commands.Cog, name='Valorant'):
         view = ui.View()
         view.add_item(ui.Button(label='Tutorial', emoji='🔗', url='https://youtu.be/cFMNHEHEp2A'))
         await interaction.followup.send(f'{response.get("FAILURE")}', view=view, ephemeral=True)
+
+    @app_commands.command(name='login-link', description='Get a Riot browser login link')
+    async def login_link(self, interaction: Interaction[ValorantBot]) -> None:
+        view = ui.View()
+        view.add_item(ui.Button(label='Riot Login', url=RIOT_BROWSER_LOGIN_URL))
+        await interaction.response.send_message(
+            'กดปุ่มเพื่อเข้าสู่ระบบ Riot ผ่าน browser แล้วคัดลอก URL หลังล็อกอินสำเร็จมาใช้กับ `/web-login`',
+            view=view,
+            ephemeral=True,
+        )
+
+    @app_commands.command(name='web-login', description='Log in with the Riot browser redirect URL')
+    @app_commands.describe(url='Paste the URL after Riot redirects you to playvalorant.com/opt_in')
+    async def web_login(self, interaction: Interaction[ValorantBot], url: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        response = ResponseLanguage('login', interaction.locale.value)  # type: ignore
+        login = await self.db.redirect_url_login(interaction.user.id, url, interaction.locale.value)
+
+        if login['auth']:  # type: ignore
+            embed = Embed(f'{response.get("SUCCESS")} **{login["player"]}!**')  # type: ignore
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        raise ValorantBotError(f'{response.get("FAILED")}')
 
     # ---------- ROAD MAP ---------- #
 

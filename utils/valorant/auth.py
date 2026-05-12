@@ -37,6 +37,15 @@ def _extract_tokens_from_uri(url: str) -> tuple[str, str]:
         raise AuthenticationError('Cookies Invalid') from e
 
 
+def _extract_auth_tokens(data: dict[str, Any]) -> tuple[str, str]:
+    if data.get('type') == 'success':
+        redirect_url = data['success']['redirect_url']
+        return _extract_tokens_from_uri(redirect_url)
+
+    response = _extract_tokens(data)
+    return response[0], response[1]
+
+
 # https://developers.cloudflare.com/ssl/ssl-tls/cipher-suites/
 
 FORCED_CIPHERS = [
@@ -93,9 +102,7 @@ class Auth:
         # language
         local_response = self.local_response()
 
-        session = ClientSession()
-
-        data = {
+        auth_cookie_payload = {
             'client_id': 'play-valorant-web-prod',
             'nonce': '1',
             'redirect_uri': 'https://playvalorant.com/opt_in',
@@ -103,47 +110,68 @@ class Auth:
             'scope': 'account openid',
         }
 
-        # headers = {'Content-Type': 'application/json', 'User-Agent': self.user_agent}
+        auth_payloads = [
+            {
+                'type': 'auth',
+                'language': 'en_US',
+                'remember': True,
+                'riot_identity': {
+                    'captcha': '',
+                    'username': username,
+                    'password': password,
+                },
+            },
+            {'type': 'auth', 'username': username, 'password': password, 'remember': True},
+        ]
 
-        r = await session.post('https://auth.riotgames.com/api/v1/authorization', json=data, headers=self._headers)
+        async def auth_attempt(payload: dict[str, Any]) -> tuple[int, dict[str, Any], dict[str, Any]]:
+            session = ClientSession()
 
-        # prepare cookies for auth request
-        cookies = {'cookie': {}}
-        for cookie in r.cookies.items():
-            cookies['cookie'][cookie[0]] = str(cookie).split('=')[1].split(';')[0]
+            r = await session.post(
+                'https://auth.riotgames.com/api/v1/authorization',
+                json=auth_cookie_payload,
+                headers=self._headers,
+            )
 
-        data = {'type': 'auth', 'username': username, 'password': password, 'remember': True}
-
-        async with session.put(
-            'https://auth.riotgames.com/api/v1/authorization', json=data, headers=self._headers
-        ) as r:
-            data = await r.json()
+            cookies: dict[str, Any] = {'cookie': {}}
             for cookie in r.cookies.items():
                 cookies['cookie'][cookie[0]] = str(cookie).split('=')[1].split(';')[0]
 
-        # print('Response Status:', r.status)
-        await session.close()
+            async with session.put(
+                'https://auth.riotgames.com/api/v1/authorization', json=payload, headers=self._headers
+            ) as r:
+                data = await r.json()
+                for cookie in r.cookies.items():
+                    cookies['cookie'][cookie[0]] = str(cookie).split('=')[1].split(';')[0]
+                status = r.status
 
-        if data['type'] == 'response':
-            expiry_token = datetime.now() + timedelta(hours=1)
+            await session.close()
+            return status, data, cookies
 
-            response = _extract_tokens(data)
-            access_token = response[0]
-            token_id = response[1]
+        status, data, cookies = await auth_attempt(auth_payloads[0])
+        if data.get('error') == 'auth_failure':
+            status, data, cookies = await auth_attempt(auth_payloads[1])
+
+        auth_type = data.get('type')
+        auth_error = data.get('error')
+
+        if auth_type in ('response', 'success'):
+            access_token, token_id = _extract_auth_tokens(data)
 
             expiry_token = datetime.now() + timedelta(minutes=59)
             cookies['expiry_token'] = int(datetime.timestamp(expiry_token))  # type: ignore
 
             return {'auth': 'response', 'data': {'cookie': cookies, 'access_token': access_token, 'token_id': token_id}}
 
-        if data['type'] == 'multifactor':
-            if r.status == 429:
+        if auth_type == 'multifactor':
+            if status == 429 or auth_error == 'rate_limited':
                 raise AuthenticationError(local_response.get('RATELIMIT', 'Please wait a few minutes and try again.'))
 
             label_modal = local_response.get('INPUT_2FA_CODE')
             WaitFor2FA = {'auth': '2fa', 'cookie': cookies, 'label': label_modal}
 
-            if data['multifactor']['method'] == 'email':
+            method = data['multifactor'].get('method')
+            if method == 'email':
                 WaitFor2FA['message'] = (
                     f'{local_response.get("2FA_TO_EMAIL", "Riot sent a code to")} {data["multifactor"]["email"]}'
                 )
@@ -152,7 +180,28 @@ class Auth:
             WaitFor2FA['message'] = local_response.get('2FA_ENABLE', 'You have 2FA enabled!')
             return WaitFor2FA
 
-        raise AuthenticationError(local_response.get('INVALID_PASSWORD', 'Your username or password may be incorrect!'))
+        if status == 429 or auth_error == 'rate_limited':
+            raise AuthenticationError(local_response.get('RATELIMIT', 'Please wait a few minutes and try again.'))
+
+        if auth_error in ('captcha_required', 'captcha_verification_required'):
+            raise AuthenticationError(
+                'Riot requires CAPTCHA or browser verification. Please log in with `/cookies` instead.'
+            )
+
+        if auth_error == 'auth_failure':
+            raise AuthenticationError(
+                'Riot rejected direct username/password login. '
+                'This can happen with Riot Mobile auth, CAPTCHA, or browser verification. '
+                'Please log in with `/cookies` instead.'
+            )
+
+        message = local_response.get('INVALID_PASSWORD', 'Your username or password may be incorrect!')
+        if auth_error:
+            message = f'{message} (Riot auth error: {auth_error})'
+        elif auth_type:
+            message = f'{message} (Riot auth type: {auth_type})'
+
+        raise AuthenticationError(message)
 
     async def get_entitlements_token(self, access_token: str) -> str:
         """This function is used to get the entitlements token."""
@@ -239,7 +288,7 @@ class Auth:
 
         # headers = {'Content-Type': 'application/json', 'User-Agent': self.user_agent}
 
-        data = {'type': 'multifactor', 'code': code, 'rememberDevice': True}
+        data = {'type': 'multifactor', 'multifactor': {'otp': code, 'rememberDevice': True}}
 
         async with session.put(
             'https://auth.riotgames.com/api/v1/authorization',
@@ -250,13 +299,12 @@ class Auth:
             data = await r.json()
 
         await session.close()
-        if data['type'] == 'response':
+        if data['type'] in ('response', 'success'):
             cookies = {'cookie': {}}
             for cookie in r.cookies.items():
                 cookies['cookie'][cookie[0]] = str(cookie).split('=')[1].split(';')[0]
 
-            uri = data['response']['parameters']['uri']
-            access_token, token_id = _extract_tokens_from_uri(uri)
+            access_token, token_id = _extract_auth_tokens(data)
 
             return {'auth': 'response', 'data': {'cookie': cookies, 'access_token': access_token, 'token_id': token_id}}
 
@@ -282,12 +330,15 @@ class Auth:
             cookies=cookies,
             allow_redirects=False,
         ) as r:
-            data = await r.text()
+            await r.text()
+            redirect_url = r.headers.get('Location', '')
 
-        if r.status != 303:
+        if r.status not in (301, 302, 303):
+            await session.close()
             raise AuthenticationError(local_response.get('COOKIES_EXPIRED'))
 
-        if r.headers['Location'].startswith('/login'):
+        if redirect_url.startswith('/login') or 'authenticate.riotgames.com/login' in redirect_url:
+            await session.close()
             raise AuthenticationError(local_response.get('COOKIES_EXPIRED'))
 
         old_cookie = cookies.copy()
@@ -298,7 +349,7 @@ class Auth:
 
         await session.close()
 
-        access_token, _token_id = _extract_tokens_from_uri(data)
+        access_token, _token_id = _extract_tokens_from_uri(redirect_url)
         entitlements_token = await self.get_entitlements_token(access_token)
 
         return new_cookies, access_token, entitlements_token
@@ -351,7 +402,10 @@ class Auth:
         # pop cookie
         self._headers.pop('cookie')
 
-        if r.status != 303:
+        redirect_url = r.headers.get('Location', '')
+
+        if r.status not in (301, 302, 303):
+            await session.close()
             raise AuthenticationError(local_response.get('FAILED'))
 
         await session.close()
@@ -361,10 +415,18 @@ class Auth:
         for cookie in r.cookies.items():
             new_cookies['cookie'][cookie[0]] = str(cookie).split('=')[1].split(';')[0]
 
-        accessToken, tokenID = _extract_tokens_from_uri(await r.text())
+        accessToken, tokenID = _extract_tokens_from_uri(redirect_url)
         entitlements_token = await self.get_entitlements_token(accessToken)
 
         return {'cookies': new_cookies, 'AccessToken': accessToken, 'token_id': tokenID, 'emt': entitlements_token}
+
+    async def login_with_redirect_url(self, redirect_url: str) -> dict[str, Any]:
+        """Log in with the URL Riot redirects to after a browser login."""
+
+        accessToken, tokenID = _extract_tokens_from_uri(redirect_url)
+        entitlements_token = await self.get_entitlements_token(accessToken)
+
+        return {'cookies': {'cookie': {}}, 'AccessToken': accessToken, 'token_id': tokenID, 'emt': entitlements_token}
 
     async def refresh_token(self, cookies: dict) -> tuple[dict[str, Any], str, str]:
         return await self.redeem_cookies(cookies)

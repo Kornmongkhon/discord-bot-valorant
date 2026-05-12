@@ -312,6 +312,12 @@ class GetFormat:
 
         offer_list = data['SkinsPanelLayout']['SingleItemOffers']
         duration = data['SkinsPanelLayout']['SingleItemOffersRemainingDurationInSeconds']
+        store_offers = data['SkinsPanelLayout'].get('SingleItemStoreOffers', [])
+        store_prices = {
+            offer['OfferID']: next(iter(offer.get('Cost', {}).values()), '-')
+            for offer in store_offers
+            if 'OfferID' in offer
+        }
 
         skin_count = 0
 
@@ -319,7 +325,7 @@ class GetFormat:
             skin = GetItems.get_skin(skin_id)
             name, icon = skin['names'][str(VLR_locale)], skin['icon']
 
-            price = GetItems.get_skin_price(skin_id)
+            price = store_prices.get(skin_id, GetItems.get_skin_price(skin_id))
             tier_icon = GetItems.get_skin_tier_icon(skin_id)
 
             if skin_count == 0:

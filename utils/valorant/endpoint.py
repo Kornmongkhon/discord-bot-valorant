@@ -77,24 +77,30 @@ class API_ENDPOINT:
 
         endpoint_url = getattr(self, url)
 
-        data = None
-
         r = requests.get(f'{endpoint_url}{endpoint}', headers=self.headers)
 
         try:  # noqa: SIM105
             data = json.loads(r.text)
         except Exception:
-            pass
+            data = None
 
-        if 'httpStatus' not in data:  # type: ignore
-            return data  # type: ignore
+        if data is None:
+            print(f'API fetch failed: {endpoint_url}{endpoint} HTTP {r.status_code} {r.text[:300]}')
+            raise ResponseError(f'{self.response.get("REQUEST_FAILED")} ({endpoint}, HTTP {r.status_code})')
+
+        if not isinstance(data, dict):
+            return data  # type: ignore[return-value]
+
+        if 'httpStatus' not in data:
+            return data
 
         if r.status_code == 400:
             response = LocalErrorResponse('AUTH', self.locale_code)
             raise ResponseError(response.get('COOKIES_EXPIRED'))
             # await self.refresh_token()
             # return await self.fetch(endpoint=endpoint, url=url, errors=errors)
-        return {}
+        message = data.get('message') or data.get('error') or self.response.get('REQUEST_FAILED')
+        raise ResponseError(f'{message} ({endpoint}, HTTP {r.status_code})')
 
     def put(
         self,
@@ -110,12 +116,48 @@ class API_ENDPOINT:
         endpoint_url = getattr(self, url)
 
         r = requests.put(f'{endpoint_url}{endpoint}', headers=self.headers, data=data)
-        data = json.loads(r.text)
+        try:
+            data = json.loads(r.text)
+        except Exception as e:
+            print(f'API put failed: {endpoint_url}{endpoint} HTTP {r.status_code} {r.text[:300]}')
+            raise ResponseError(f'{self.response.get("REQUEST_FAILED")} ({endpoint}, HTTP {r.status_code})') from e
 
         if data is None:
             raise ResponseError(self.response.get('REQUEST_FAILED'))
 
+        if isinstance(data, dict) and 'httpStatus' in data:
+            message = data.get('message') or data.get('error') or self.response.get('REQUEST_FAILED')
+            raise ResponseError(f'{message} ({endpoint}, HTTP {r.status_code})')
+
         return data
+
+    def post(
+        self,
+        endpoint: str = '/',
+        url: str = 'pd',
+        data: dict[str, Any] | list[Any] | None = None,
+    ) -> Any:
+        """post data to the api"""
+
+        self.locale_response()
+
+        endpoint_url = getattr(self, url)
+
+        r = requests.post(f'{endpoint_url}{endpoint}', headers=self.headers, json=data or {})
+        try:
+            payload = json.loads(r.text)
+        except Exception as e:
+            print(f'API post failed: {endpoint_url}{endpoint} HTTP {r.status_code} {r.text[:300]}')
+            raise ResponseError(f'{self.response.get("REQUEST_FAILED")} ({endpoint}, HTTP {r.status_code})') from e
+
+        if payload is None:
+            raise ResponseError(self.response.get('REQUEST_FAILED'))
+
+        if isinstance(payload, dict) and 'httpStatus' in payload:
+            message = payload.get('message') or payload.get('error') or self.response.get('REQUEST_FAILED')
+            raise ResponseError(f'{message} ({endpoint}, HTTP {r.status_code})')
+
+        return payload
 
     # contracts endpoints
 
@@ -187,7 +229,7 @@ class API_ENDPOINT:
         Store_GetStorefrontV2
         Get the currently available items in the store
         """
-        return self.fetch(f'/store/v2/storefront/{self.puuid}', url='pd')
+        return self.post(f'/store/v3/storefront/{self.puuid}', url='pd')
 
     def store_fetch_wallet(self) -> dict[str, Any]:
         """

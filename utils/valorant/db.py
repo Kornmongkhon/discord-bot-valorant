@@ -134,7 +134,11 @@ class DATABASE:
         if timestamp_utc() > expiry_token:
             access_token, entitlements_token = await self.refresh_token(user_id, auth)  # type: ignore
 
-        headers = {'Authorization': f'Bearer {access_token}', 'X-Riot-Entitlements-JWT': entitlements_token}
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {access_token}',
+            'X-Riot-Entitlements-JWT': entitlements_token,
+        }
 
         return {
             'puuid': puuid,
@@ -219,6 +223,49 @@ class DATABASE:
         auth.locale_code = locale_code
 
         data = await auth.login_with_cookie(cookie)
+
+        cookie = data['cookies']
+        access_token = data['AccessToken']
+        token_id = data['token_id']
+        entitlements_token = data['emt']
+
+        puuid, name, tag = await auth.get_userinfo(access_token)
+        region = await auth.get_region(access_token, token_id)
+        player_name = f'{name}#{tag}' if tag is not None and tag is not None else 'no_username'
+
+        expiry_token = datetime.timestamp(datetime.utcnow() + timedelta(minutes=59))
+
+        try:
+            data = {
+                'cookie': cookie,
+                'access_token': access_token,
+                'token_id': token_id,
+                'emt': entitlements_token,
+                'puuid': puuid,
+                'username': player_name,
+                'region': region,
+                'expiry_token': expiry_token,
+                'notify_mode': None,
+                'DM_Message': True,
+            }
+
+            db[str(user_id)] = data
+            self.insert_user(db)
+
+        except Exception as e:
+            print(e)
+            return {'auth': False}
+        else:
+            return {'auth': True, 'player': player_name}
+
+    async def redirect_url_login(self, user_id: int, redirect_url: str, locale_code: str) -> dict[str, Any] | None:
+        """Login with Riot browser redirect URL"""
+
+        db = self.read_db()
+        auth = self.auth
+        auth.locale_code = locale_code
+
+        data = await auth.login_with_redirect_url(redirect_url)
 
         cookie = data['cookies']
         access_token = data['AccessToken']

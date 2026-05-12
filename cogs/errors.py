@@ -39,6 +39,20 @@ class ErrorHandler(commands.Cog):
         self.bot: ValorantBot = bot
         bot.tree.on_error = self.on_app_command_error
 
+    async def send_app_command_error(self, interaction: Interaction, embed: discord.Embed) -> None:
+        """Send an app-command error without crashing if the interaction was already acknowledged."""
+
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except discord.HTTPException as exc:
+            if exc.code != 40060:
+                raise
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
     async def on_app_command_error(self, interaction: Interaction, error: AppCommandError) -> None:
         """Handles errors for all application commands."""
 
@@ -62,13 +76,11 @@ class ErrorHandler(commands.Cog):
             error_message = 'Could not connect to Riot server.'
         elif isinstance(error, (CommandOnCooldown | AppCommandNotFound | MissingPermissions | BotMissingPermissions)):
             error = error  # noqa: PLW0127
-        # else:
-        #     traceback.print_exception(type(error), error)
+        else:
+            traceback.print_exception(type(error), error, error.__traceback__)
 
         embed = discord.Embed(description=f'{str(error_message)[:2000]}', color=0xFE676E)
-        if interaction.response.is_done():
-            return await interaction.followup.send(embed=embed, ephemeral=True)
-        return await interaction.response.send_message(embed=embed, ephemeral=True)
+        await self.send_app_command_error(interaction, embed)
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context[ValorantBot], error: Exception) -> None:  # noqa: PLR6301
