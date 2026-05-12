@@ -59,8 +59,10 @@ valorant_locale_overwrite = {
     'vi': 'vi-VN',  # vietnamese
 }
 
-_current_locale = ContextVar('_current_locale', default='en-US')
-_valorant_current_locale = ContextVar('_valorant_current_locale', default='en-US')
+DEFAULT_LOCALE = 'th'
+
+_current_locale = ContextVar('_current_locale', default=DEFAULT_LOCALE)
+_valorant_current_locale = ContextVar('_valorant_current_locale', default=DEFAULT_LOCALE)
 
 
 def get_interaction_locale() -> str:
@@ -70,12 +72,12 @@ def get_interaction_locale() -> str:
 
 def set_interaction_locale(locale: str | None) -> None:
     """Set the locale for bot"""
-    _current_locale.set(locale)  # type: ignore[arg-type]
+    _current_locale.set(locale or DEFAULT_LOCALE)
 
 
 def get_valorant_locale() -> str:
     """Get the locale for valorant api"""
-    return valorant_locale_overwrite.get(str(_valorant_current_locale.get()), 'en-US')
+    return valorant_locale_overwrite.get(str(_valorant_current_locale.get()), 'th-TH')
 
 
 def set_valorant_locale(locale: str | None) -> None:
@@ -84,8 +86,8 @@ def set_valorant_locale(locale: str | None) -> None:
     language_files = os.listdir('languages')
     locale_json = str(locale) + '.json'
     if locale_json not in language_files:
-        _valorant_current_locale.set('en-US')
-    _valorant_current_locale.set(locale)  # type: ignore[arg-type]
+        locale = DEFAULT_LOCALE
+    _valorant_current_locale.set(locale)
 
 
 class ValorantTranslator:

@@ -8,6 +8,7 @@ from discord import Interaction
 from discord.app_commands import (
     AppCommandError,
     BotMissingPermissions,
+    CommandInvokeError,
     CommandNotFound as AppCommandNotFound,
     CommandOnCooldown,
     MissingPermissions,
@@ -45,8 +46,8 @@ class ErrorHandler(commands.Cog):
             traceback.print_exception(type(error), error, error.__traceback__)
 
         error_message = 'An unknown error occurred, sorry'
-        # if isinstance(error, CommandInvokeError):
-        #     error = error.original
+        if isinstance(error, CommandInvokeError):
+            error = error.original
         if isinstance(error, NotOwner):
             error_message = 'You are not the owner of this bot.'
         elif isinstance(error, BadArgument):

@@ -39,10 +39,8 @@ class ValorantBot(commands.Bot):
 
     @staticmethod
     async def interaction_check(interaction: discord.Interaction) -> bool:
-        locale_v2.set_interaction_locale(
-            interaction.locale  # type: ignore[arg-type]
-        )  # bot responses localized # wait for update # type: ignore[arg-type]
-        locale_v2.set_valorant_locale(interaction.locale)  # type: ignore[arg-type]
+        locale_v2.set_interaction_locale(locale_v2.DEFAULT_LOCALE)
+        locale_v2.set_valorant_locale(locale_v2.DEFAULT_LOCALE)
         return True
 
     @property

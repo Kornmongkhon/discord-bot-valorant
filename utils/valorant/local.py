@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .. import locale_v2
+
 # credit by /giorgi-o/
 
 Locale = {
@@ -36,8 +38,10 @@ def InteractionLanguage(local_code: str) -> str:
 
 
 def local_read(filename: str) -> dict[str, Any]:
-    path = Path(__file__).parent.parent / 'languages' / f'{filename}.json'
+    path = Path(__file__).resolve().parents[2] / 'languages' / f'{filename}.json'
     if not path.exists():
+        if filename == 'en-US':
+            return {}
         return local_read('en-US')
 
     data: dict[str, Any] = json.loads(path.read_text(encoding='utf-8'))
@@ -45,7 +49,7 @@ def local_read(filename: str) -> dict[str, Any]:
 
 
 def ResponseLanguage(command_name: str, local_code: str) -> dict[str, Any]:
-    local_code = __verify_localcode(local_code)
+    local_code = __verify_localcode(locale_v2.get_interaction_locale() or local_code)
     local = {}
     with contextlib.suppress(KeyError):
         local_dict = local_read(local_code)
@@ -54,7 +58,7 @@ def ResponseLanguage(command_name: str, local_code: str) -> dict[str, Any]:
 
 
 def LocalErrorResponse(value: str, local_code: str) -> dict[str, Any]:
-    local_code = __verify_localcode(local_code)
+    local_code = __verify_localcode(locale_v2.get_interaction_locale() or local_code)
     local = {}
     with contextlib.suppress(KeyError):
         local_dict = local_read(local_code)
@@ -63,6 +67,7 @@ def LocalErrorResponse(value: str, local_code: str) -> dict[str, Any]:
 
 
 def __verify_localcode(local_code: str) -> str:
+    local_code = str(local_code)
     if local_code in ('en-US', 'en-GB'):  # noqa: PLR6201
         return 'en-US'
     return local_code
