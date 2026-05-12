@@ -9,12 +9,12 @@ import aiohttp
 import discord
 from discord.ext import commands
 from discord.ext.commands import ExtensionFailed, ExtensionNotFound, NoEntryPointError
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 
 from utils import locale_v2
 from utils.valorant.cache import get_cache
 
-# load_dotenv()
+load_dotenv()
 
 initial_extensions = ['cogs.admin', 'cogs.errors', 'cogs.notify', 'cogs.valorant']
 
